@@ -3,44 +3,48 @@
 **Product mandate:** same as vivijure-ios -- mobile frontend to the Storyboard Planner against the
 host CONTRACT (`docs/CONTRACT.md` on vivijure-cf / vivijure-local).
 
-Sibling authority for UX stages: vivijure-ios `docs/PARITY.md` + host `public/planner*.js`.
+Sibling authority: vivijure-ios `docs/PARITY.md` + host `public/planner*.js`.
 
-## Status (0.1 vertical)
+## Studio pages -- **done**
 
 | Surface | Android |
 |---------|---------|
-| Auth / Keychain (EncryptedSharedPreferences) | **done** |
-| Planner steps Plan → History | **done** (core path) |
-| Cast library list/create/delete | **done** |
-| Modules projection dump | **done** |
-| Settings connection | **done** |
+| Auth (EncryptedSharedPreferences) | **done** |
+| Planner stepped Plan → History | **done** |
+| Cast library + detail | **done** |
+| Modules (projection + install + config) | **done** |
+| Settings (prefs, storage, demo, notify) | **done** |
 
-### Planner detail
+## Planner stages -- **done**
+
+| Stage | Notes |
+|-------|--------|
+| Plan | projects load/delete/save, models, slots A–D, plan/refine, scenes, YAML, session restore |
+| Cast & Bundle | preflight, bindings, characterRefs, **scene start keyframes**, bundle |
+| Audio | score-bed, **upload BYO**, analyze BPM, snap, suggest prompt |
+| Render | quality, motion, keyframes-only, scatter, schema knobs, expert JSON |
+| History | tags/label/delete, load, artifacts, add-audio/narration, finalize, **cloud/hybrid**, **lock/regen**, per-shot maps |
+
+## Supporting -- **done**
 
 | Capability | Status |
 |------------|--------|
-| Projects create/select | **done** |
-| Plan + characters slots A–D | **done** |
-| Refine | **done** |
-| Scene prompt edit + apply | **done** |
-| YAML preview | **done** |
-| Preflight + castBindings | **done** |
-| Bundle characterRefs from cast | **done** |
-| Score-bed + suggest prompt | **done** |
-| BPM snap | **done** |
-| Quality / motion / keyframes-only / scatter | **done** |
-| Schema knobs + expert JSON | **done** (basic) |
-| Render submit + poll | **done** |
-| History list / open artifact / load / delete | **done** |
-
-### Still thinner than iOS
-
-Cast media upload / train / generate-refs / vvcast; history tags/lock/regen/animate; install-scope
-module config UI; demo mode; notifications; session restore blob.
+| Cast media upload (portrait/ref/source) | **done** |
+| generate-refs + poll | **done** |
+| train SDXL / Wan LoRA | **done** |
+| `.vvcast` import/export | **done** |
+| Module install/enable/uninstall | **done** (dispatch hosts) |
+| Install-scope config JSON | **done** |
+| Prefs GET/PATCH | **done** |
+| Storage usage/reconcile | **done** |
+| Demo menu/render/chat | **done** (when host enables) |
+| Notify on render done | **done** |
+| Session restore + poll resume | **done** |
 
 ## Slice history
 
 | Slice | Notes |
 |-------|--------|
-| 0 skeleton | AGPL scaffold |
-| 1 vertical | Kit CONTRACT client + Compose stepped planner shell |
+| 0 skeleton | AGPLscaffold |
+| 1 vertical | Kit + stepped Compose shell |
+| 2 complete | Cast media/train/vvcast, history post-actions, modules, demo, notify, session |

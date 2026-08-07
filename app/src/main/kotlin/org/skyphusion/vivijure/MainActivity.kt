@@ -4,7 +4,9 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -22,9 +24,6 @@ import androidx.compose.material.icons.filled.Groups
 import androidx.compose.material.icons.filled.Movie
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Widgets
-import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.buildJsonArray
-import kotlinx.serialization.json.buildJsonObject
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenuItem
@@ -54,6 +53,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
+import java.io.File
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import org.skyphusion.vivijure.kit.RenderConfigSchema
 import org.skyphusion.vivijure.kit.StoryboardHelpers
 import org.skyphusion.vivijure.kit.pretty
@@ -240,7 +247,7 @@ fun PlanStep(vm: AppViewModel) {
         DropdownMenuItem(
           text = { Text("(transient)") },
           onClick = {
-            vm.selectedProjectId = null
+            vm.selectProject(null)
             expanded = false
           },
         )
@@ -248,7 +255,7 @@ fun PlanStep(vm: AppViewModel) {
           DropdownMenuItem(
             text = { Text(p.name) },
             onClick = {
-              vm.selectedProjectId = p.id
+              vm.selectProject(p.id)
               expanded = false
             },
           )
@@ -271,6 +278,12 @@ fun PlanStep(vm: AppViewModel) {
           }
         },
       ) { Text("Create") }
+    }
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      if (vm.selectedProjectId != null) {
+        TextButton(onClick = { vm.deleteSelectedProject() }) { Text("Delete project") }
+        TextButton(onClick = { vm.saveStoryboardToProject() }) { Text("Save board") }
+      }
     }
 
     Text("Cast slots A–D", style = MaterialTheme.typography.titleMedium)
@@ -377,6 +390,7 @@ fun PlanStep(vm: AppViewModel) {
           label = { Text(scene.id) },
           modifier = Modifier.fillMaxWidth(),
         )
+        TextButton(onClick = { vm.deleteScene(i) }) { Text("Delete ${scene.id}") }
       }
       Button(onClick = { vm.commitSceneEdits() }) { Text("Apply scene edits") }
       if (vm.yamlPreview.isNotBlank()) {
@@ -437,6 +451,42 @@ fun CastBundleStep(vm: AppViewModel) {
         }
       }
     }
+    Text("Scene start keyframes (optional)", style = MaterialTheme.typography.titleMedium)
+    val ctx = LocalContext.current
+    var pendingSceneId by remember { mutableStateOf<String?>(null) }
+    val sceneStartPicker =
+      rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        val sid = pendingSceneId ?: return@rememberLauncherForActivityResult
+        if (uri == null) return@rememberLauncherForActivityResult
+        val bytes =
+          ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+            ?: return@rememberLauncherForActivityResult
+        val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
+        vm.stageSceneStart(sid, bytes, mime)
+        pendingSceneId = null
+      }
+    val scenes = vm.storyboard?.let { StoryboardHelpers.sceneIds(it) }.orEmpty()
+    scenes.forEach { sid ->
+      Row {
+        Column(Modifier.weight(1f)) {
+          Text(sid)
+          Text(
+            vm.sceneStartImages[sid] ?: "no start image",
+            fontFamily = FontFamily.Monospace,
+            style = MaterialTheme.typography.bodySmall,
+          )
+        }
+        if (vm.sceneStartImages[sid] != null) {
+          TextButton(onClick = { vm.clearSceneStart(sid) }) { Text("Clear") }
+        }
+        TextButton(
+          onClick = {
+            pendingSceneId = sid
+            sceneStartPicker.launch("image/*")
+          },
+        ) { Text("Pick") }
+      }
+    }
     Button(onClick = { vm.runPreflight() }, enabled = !vm.busy) { Text("Run preflight") }
     vm.preflight?.let {
       Text(if (it.ok) "Preflight OK" else "Issues present")
@@ -448,6 +498,14 @@ fun CastBundleStep(vm: AppViewModel) {
 
 @Composable
 fun AudioStep(vm: AppViewModel) {
+  val ctx = LocalContext.current
+  val audioPicker =
+    rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+      if (uri == null) return@rememberLauncherForActivityResult
+      val bytes = ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return@rememberLauncherForActivityResult
+      val mime = ctx.contentResolver.getType(uri) ?: "audio/mpeg"
+      vm.uploadAudio(bytes, mime)
+    }
   Column(
     Modifier
       .fillMaxSize()
@@ -467,13 +525,22 @@ fun AudioStep(vm: AppViewModel) {
     Button(onClick = { vm.scoreBed() }, enabled = vm.storyboard != null && !vm.busy) {
       Text("Generate score-bed")
     }
-    vm.audioKey?.let { Text("audioKey: $it", fontFamily = FontFamily.Monospace) }
+    Button(onClick = { audioPicker.launch("audio/*") }, enabled = !vm.busy) {
+      Text("Import audio file")
+    }
+    vm.audioKey?.let {
+      Text("audioKey: $it", fontFamily = FontFamily.Monospace)
+      TextButton(onClick = { vm.audioKey = null; vm.persistSession() }) { Text("Clear bed") }
+    }
     OutlinedTextField(
       value = vm.bpm.toString(),
       onValueChange = { it.toDoubleOrNull()?.let { d -> vm.bpm = d } },
       label = { Text("BPM") },
       modifier = Modifier.fillMaxWidth(),
     )
+    Button(onClick = { vm.analyzeAudio() }, enabled = vm.audioKey != null && !vm.busy) {
+      Text("Analyze bed BPM")
+    }
     Button(onClick = { vm.snapBpm() }, enabled = vm.storyboard != null) {
       Text("Snap scene durations")
     }
@@ -603,8 +670,26 @@ fun HistoryStep(vm: AppViewModel) {
     verticalArrangement = Arrangement.spacedBy(8.dp),
   ) {
     Button(onClick = { vm.refreshHistory() }) { Text("Refresh") }
+    if (vm.renderTags.isNotEmpty()) {
+      Text("Tags: ${vm.renderTags.joinToString()}", style = MaterialTheme.typography.bodySmall)
+    }
     if (vm.renders.isEmpty()) Text("No renders loaded.")
+    if (vm.cloudMotionModels.isNotEmpty()) {
+      Text("Default cloud model")
+      Row(Modifier.horizontalScroll(rememberScrollState())) {
+        vm.cloudMotionModels.forEach { m ->
+          FilterChip(
+            selected = vm.cloudAnimateModel == m,
+            onClick = { vm.cloudAnimateModel = m },
+            label = { Text(m) },
+          )
+        }
+      }
+    }
     vm.renders.forEach { r ->
+      var label by remember(r.id) { mutableStateOf(r.label.orEmpty()) }
+      var tags by remember(r.id) { mutableStateOf(r.tags?.joinToString(", ").orEmpty()) }
+      var narration by remember(r.id) { mutableStateOf("") }
       Column(Modifier.padding(vertical = 6.dp)) {
         Text(r.label ?: r.jobId ?: "#${r.id}", style = MaterialTheme.typography.titleSmall)
         Text("${r.status ?: "?"} · ${r.qualityTier ?: ""} · ${r.mode ?: ""}")
@@ -623,6 +708,76 @@ fun HistoryStep(vm: AppViewModel) {
         if (r.bundleKey != null) {
           TextButton(onClick = { vm.loadRender(r) }) { Text("Load into planner") }
         }
+        OutlinedTextField(
+          value = label,
+          onValueChange = { label = it },
+          label = { Text("Label") },
+          modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(onClick = { vm.patchRenderLabel(r.id, label) }) { Text("Save label") }
+        OutlinedTextField(
+          value = tags,
+          onValueChange = { tags = it },
+          label = { Text("Tags (comma)") },
+          modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(onClick = { vm.patchRenderTags(r.id, tags) }) { Text("Save tags") }
+        TextButton(onClick = { vm.addAudioToHistory(r.id) }, enabled = vm.audioKey != null) {
+          Text("Add audio bed")
+        }
+        OutlinedTextField(
+          value = narration,
+          onValueChange = { narration = it },
+          label = { Text("Narration") },
+          modifier = Modifier.fillMaxWidth(),
+        )
+        TextButton(onClick = { vm.addNarrationToHistory(r.id, narration) }) { Text("Add narration") }
+        TextButton(onClick = { vm.finalizeHistory(r.id) }) { Text("Finalize (GPU)") }
+        TextButton(onClick = { vm.animateCloudHistory(r.id) }) { Text("Animate cloud") }
+        TextButton(onClick = { vm.animateHybridHistory(r.id) }) { Text("Animate hybrid") }
+        val shots = r.keyframeShotIds
+        if (shots.isNotEmpty()) {
+          LaunchedEffect(r.id) { vm.seedPerShotMaps(r) }
+          Text("Keyframes", style = MaterialTheme.typography.titleSmall)
+          shots.forEach { shot ->
+            Row {
+              Text(shot, modifier = Modifier.weight(1f), fontFamily = FontFamily.Monospace)
+              val locked = r.resolvedLocked.contains(shot)
+              TextButton(onClick = { vm.toggleLockedShot(r.id, shot, r.resolvedLocked) }) {
+                Text(if (locked) "Unlock" else "Lock")
+              }
+              TextButton(onClick = { vm.regenShot(r.id, shot) }) { Text("Regen") }
+            }
+            if (vm.cloudMotionModels.isNotEmpty()) {
+              Row(Modifier.horizontalScroll(rememberScrollState())) {
+                FilterChip(
+                  selected = (vm.cloudPerShot[shot] ?: "").isEmpty(),
+                  onClick = { vm.cloudPerShot[shot] = "" },
+                  label = { Text("cloud default") },
+                )
+                vm.cloudMotionModels.forEach { m ->
+                  FilterChip(
+                    selected = vm.cloudPerShot[shot] == m,
+                    onClick = { vm.cloudPerShot[shot] = m },
+                    label = { Text(m) },
+                  )
+                }
+              }
+            }
+            Row {
+              FilterChip(
+                selected = (vm.hybridPerShot[shot] ?: "gpu") == "gpu",
+                onClick = { vm.hybridPerShot[shot] = "gpu" },
+                label = { Text("GPU") },
+              )
+              FilterChip(
+                selected = vm.hybridPerShot[shot] == "cloud",
+                onClick = { vm.hybridPerShot[shot] = "cloud" },
+                label = { Text("Cloud") },
+              )
+            }
+          }
+        }
         TextButton(onClick = { vm.deleteRender(r.id) }) { Text("Delete") }
         HorizontalDivider()
       }
@@ -634,6 +789,26 @@ fun HistoryStep(vm: AppViewModel) {
 fun CastScreen(vm: AppViewModel) {
   var name by remember { mutableStateOf("") }
   var bible by remember { mutableStateOf("") }
+  val ctx = LocalContext.current
+  var uploadKind by remember { mutableStateOf("portrait") }
+  val imagePicker =
+    rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+      val id = vm.selectedCastId ?: return@rememberLauncherForActivityResult
+      if (uri == null) return@rememberLauncherForActivityResult
+      val bytes =
+        ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+          ?: return@rememberLauncherForActivityResult
+      val mime = ctx.contentResolver.getType(uri) ?: "image/jpeg"
+      vm.uploadCastImage(id, uploadKind, bytes, mime)
+    }
+  val importPicker =
+    rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+      if (uri == null) return@rememberLauncherForActivityResult
+      val bytes =
+        ctx.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+          ?: return@rememberLauncherForActivityResult
+      vm.importCast(bytes)
+    }
   LaunchedEffect(Unit) { vm.refreshCast() }
   Column(
     Modifier
@@ -655,17 +830,69 @@ fun CastScreen(vm: AppViewModel) {
         }
       },
     ) { Text("Create") }
+    Button(onClick = { importPicker.launch("*/*") }) { Text("Import .vvcast") }
     Text("Cast", style = MaterialTheme.typography.titleMedium)
     vm.cast.forEach { m ->
+      val selected = vm.selectedCastId == m.id
       Column(Modifier.padding(vertical = 4.dp)) {
-        Text(m.name, style = MaterialTheme.typography.titleSmall)
+        TextButton(onClick = { vm.selectedCastId = if (selected) null else m.id }) {
+          Text(if (selected) "▼ ${m.name}" else "▶ ${m.name}")
+        }
         Text(m.id, style = MaterialTheme.typography.bodySmall, fontFamily = FontFamily.Monospace)
         m.bible?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
         Text(
           "portrait=${m.portraitKey != null} refs=${m.refKeyList.size} LoRA=${m.loraStatus ?: "?"}",
           style = MaterialTheme.typography.bodySmall,
         )
-        TextButton(onClick = { vm.deleteCast(m.id) }) { Text("Delete") }
+        if (selected) {
+          var editName by remember(m.id) { mutableStateOf(m.name) }
+          var editBible by remember(m.id) { mutableStateOf(m.bible.orEmpty()) }
+          OutlinedTextField(
+            value = editName,
+            onValueChange = { editName = it },
+            label = { Text("Name") },
+            modifier = Modifier.fillMaxWidth(),
+          )
+          OutlinedTextField(
+            value = editBible,
+            onValueChange = { editBible = it },
+            label = { Text("Bible") },
+            modifier = Modifier.fillMaxWidth(),
+          )
+          TextButton(onClick = { vm.patchCast(m.id, editName, editBible) }) { Text("Save") }
+          Text("Upload as")
+          Row {
+            listOf("portrait", "ref", "source").forEach { k ->
+              FilterChip(
+                selected = uploadKind == k,
+                onClick = { uploadKind = k },
+                label = { Text(k) },
+              )
+            }
+          }
+          TextButton(onClick = { imagePicker.launch("image/*") }) { Text("Pick photo") }
+          TextButton(onClick = { vm.generateCastRefs(m.id) }) { Text("Generate refs") }
+          TextButton(onClick = { vm.trainCast(m.id, wan = false) }) { Text("Train SDXL LoRA") }
+          TextButton(onClick = { vm.trainCast(m.id, wan = true) }) { Text("Train Wan LoRA") }
+          TextButton(
+            onClick = {
+              vm.exportCast(m.id) { bytes, filename ->
+                val file = File(ctx.cacheDir, filename)
+                file.writeBytes(bytes)
+                val uri =
+                  FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
+                val share =
+                  Intent(Intent.ACTION_SEND).apply {
+                    type = "application/x-tar"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                  }
+                ctx.startActivity(Intent.createChooser(share, "Export .vvcast"))
+              }
+            },
+          ) { Text("Export .vvcast") }
+          TextButton(onClick = { vm.deleteCast(m.id) }) { Text("Delete") }
+        }
       }
     }
   }
@@ -673,6 +900,7 @@ fun CastScreen(vm: AppViewModel) {
 
 @Composable
 fun ModulesScreen(vm: AppViewModel) {
+  var scriptName by remember { mutableStateOf("") }
   Column(
     Modifier
       .fillMaxSize()
@@ -687,6 +915,42 @@ fun ModulesScreen(vm: AppViewModel) {
     }
     Text("Quality tiers: ${mods.qualityTiers.joinToString()}")
     Text("Motion backends: ${mods.motionBackends().joinToString()}")
+    Text("Install (MODULE_DISPATCH hosts)", style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(
+      value = scriptName,
+      onValueChange = { scriptName = it },
+      label = { Text("script_name") },
+      modifier = Modifier.fillMaxWidth(),
+    )
+    Button(
+      onClick = {
+        val n = scriptName.trim()
+        if (n.isNotEmpty()) vm.installModule(n)
+      },
+    ) { Text("Install") }
+    vm.installedModules.forEach { el ->
+      val name =
+        el.jsonObject["name"]?.jsonPrimitive?.contentOrNull
+          ?: el.jsonObject["module"]?.jsonPrimitive?.contentOrNull
+          ?: el.jsonPrimitive.contentOrNull
+          ?: "?"
+      Row {
+        Text(name, modifier = Modifier.weight(1f))
+        TextButton(onClick = { vm.setModuleEnabled(name, true) }) { Text("On") }
+        TextButton(onClick = { vm.setModuleEnabled(name, false) }) { Text("Off") }
+        TextButton(onClick = { vm.uninstallModule(name) }) { Text("Uninstall") }
+        TextButton(onClick = { vm.loadModuleConfig(name) }) { Text("Config") }
+      }
+    }
+    if (vm.moduleConfigName.isNotBlank()) {
+      Text("Config: ${vm.moduleConfigName}")
+      OutlinedTextField(
+        value = vm.moduleConfigJson,
+        onValueChange = { vm.moduleConfigJson = it },
+        modifier = Modifier.fillMaxWidth().height(140.dp),
+      )
+      Button(onClick = { vm.saveModuleConfig() }) { Text("Save config") }
+    }
     Text("Projection (raw)", style = MaterialTheme.typography.titleMedium)
     val raw =
       buildJsonObject {
@@ -701,6 +965,8 @@ fun ModulesScreen(vm: AppViewModel) {
 
 @Composable
 fun SettingsScreen(vm: AppViewModel) {
+  var demoMsg by remember { mutableStateOf("") }
+  var demoReply by remember { mutableStateOf("") }
   Column(
     Modifier
       .fillMaxSize()
@@ -713,6 +979,50 @@ fun SettingsScreen(vm: AppViewModel) {
     Text("User: ${vm.whoami?.user ?: vm.whoami?.email ?: "—"}")
     Button(onClick = { vm.bootstrap() }) { Text("Reconnect") }
     Button(onClick = { vm.signOut() }) { Text("Sign out") }
+    Row {
+      Text("Notify on render done", modifier = Modifier.weight(1f))
+      Switch(checked = vm.notifyOnRender, onCheckedChange = { vm.enableRenderNotifications(it) })
+    }
+    if (vm.renderJobId != null) {
+      Text("Poll: ${vm.renderJobId} · ${vm.renderStatus}", style = MaterialTheme.typography.bodySmall)
+    }
+    Text("Prefs", style = MaterialTheme.typography.titleMedium)
+    OutlinedTextField(
+      value = vm.prefsJson,
+      onValueChange = { vm.prefsJson = it },
+      modifier = Modifier.fillMaxWidth().height(120.dp),
+    )
+    Button(onClick = { vm.savePrefs() }) { Text("Save prefs") }
+    Text("Storage", style = MaterialTheme.typography.titleMedium)
+    Button(onClick = { vm.refreshStorage() }) { Text("Refresh usage") }
+    if (vm.storageSummary.isNotBlank()) Text(vm.storageSummary)
+    Button(onClick = { vm.reconcileStorage() }) { Text("Reconcile") }
+    if (vm.demoAvailable == true) {
+      Text("Demo mode", style = MaterialTheme.typography.titleMedium)
+      vm.demoScenes.forEach { scene ->
+        val name =
+          scene.jsonPrimitive.contentOrNull
+            ?: scene.jsonObject["id"]?.jsonPrimitive?.contentOrNull
+            ?: scene.jsonObject["name"]?.jsonPrimitive?.contentOrNull
+            ?: scene.pretty().take(40)
+        Button(onClick = { vm.runDemoRender(name) }) { Text("Demo render: $name") }
+      }
+      if (vm.demoStatus.isNotBlank()) Text("Demo: ${vm.demoStatus}")
+      OutlinedTextField(
+        value = demoMsg,
+        onValueChange = { demoMsg = it },
+        label = { Text("Demo chat") },
+        modifier = Modifier.fillMaxWidth(),
+      )
+      Button(
+        onClick = {
+          vm.runDemoChat(demoMsg) { demoReply = it }
+        },
+      ) { Text("Send") }
+      if (demoReply.isNotBlank()) Text(demoReply)
+    } else if (vm.demoAvailable == false) {
+      Text("Demo not available on this host.", style = MaterialTheme.typography.bodySmall)
+    }
     Spacer(Modifier.height(12.dp))
     Text(
       "Vivijure for Android is a mobile frontend to the Storyboard Planner. " +

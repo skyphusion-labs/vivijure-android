@@ -30,8 +30,18 @@ class TokenStore(context: Context) {
     prefs.edit().remove(KEY_TOKEN).apply()
   }
 
+  var sessionJson: String
+    get() = prefs.getString(KEY_SESSION, "").orEmpty()
+    set(v) = prefs.edit().putString(KEY_SESSION, v).apply()
+
+  var notifyOnRender: Boolean
+    get() = prefs.getBoolean(KEY_NOTIFY, false)
+    set(v) = prefs.edit().putBoolean(KEY_NOTIFY, v).apply()
+
   companion object {
     private const val KEY_URL = "studio_url"
     private const val KEY_TOKEN = "studio_token"
+    private const val KEY_SESSION = "planner_session_v1"
+    private const val KEY_NOTIFY = "notify_on_render"
   }
 }

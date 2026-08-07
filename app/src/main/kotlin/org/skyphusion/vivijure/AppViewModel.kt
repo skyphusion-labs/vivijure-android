@@ -91,9 +91,24 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
   }
   var sceneStartImages = mutableStateMapOf<String, String>()
   var renderFieldValues = mutableStateMapOf<String, JsonElement>()
+  var renderTags by mutableStateOf<List<String>>(emptyList())
+  var cloudAnimateModel by mutableStateOf("")
+  var cloudPerShot = mutableStateMapOf<String, String>()
+  var hybridPerShot = mutableStateMapOf<String, String>()
+  var installedModules by mutableStateOf<List<JsonElement>>(emptyList())
+  var moduleConfigName by mutableStateOf("")
+  var moduleConfigJson by mutableStateOf("")
+  var prefsJson by mutableStateOf("")
+  var storageSummary by mutableStateOf("")
+  var demoAvailable by mutableStateOf<Boolean?>(null)
+  var demoScenes by mutableStateOf<List<JsonElement>>(emptyList())
+  var demoStatus by mutableStateOf("")
+  var notifyOnRender by mutableStateOf(false)
+  var selectedCastId by mutableStateOf<String?>(null)
 
   private var client: VivijureClient? = null
   private var pollJob: Job? = null
+  private val appContext = app.applicationContext
 
   val castBindings: Map<String, String>
     get() =
@@ -102,8 +117,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         .associate { it.letter to it.boundCastId }
 
   init {
+    notifyOnRender = store.notifyOnRender
     if (isConfigured) {
       client = VivijureClient(store.studioUrl, store.token)
+      restoreSession()
     }
   }
 
@@ -136,6 +153,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     plannerStep = PlannerStep.Plan
     selectedProjectId = null
     sceneStartImages.clear()
+    persistSession()
+  }
+
+  fun enableRenderNotifications(on: Boolean) {
+    notifyOnRender = on
+    store.notifyOnRender = on
   }
 
   fun bootstrap() {
@@ -164,12 +187,109 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
           qualityTier = modules?.defaultQualityTier ?: "final"
           val backends = modules?.motionBackends().orEmpty()
           if (motionBackend.isBlank() && backends.size == 1) motionBackend = backends.first()
+          val cloud = backends.filter { !it.contains("own-gpu") }
+          if (cloudAnimateModel.isBlank()) cloudAnimateModel = cloud.firstOrNull().orEmpty()
+          installedModules = runCatching { c.listInstalledModules() }.getOrDefault(emptyList())
+          prefsJson =
+            runCatching { c.getPrefs().pretty() }.getOrDefault("{}")
+          val menu = runCatching { c.demoMenu() }.getOrNull()
+          demoAvailable = menu?.available
+          demoScenes = menu?.scenes.orEmpty()
         }
         statusMessage = "Connected as ${whoami?.user ?: whoami?.email ?: "studio"}"
+        // Resume in-flight poll after relaunch
+        val jid = renderJobId
+        if (!jid.isNullOrBlank() && !isTerminal(renderStatus)) {
+          statusMessage = "Resuming poll for $jid"
+          startPoll(c, jid)
+        }
       } catch (e: Exception) {
         lastError = e.message
       } finally {
         busy = false
+      }
+    }
+  }
+
+  private fun isTerminal(status: String): Boolean =
+    listOf("COMPLETED", "FAILED", "CANCELLED", "done", "failed")
+      .any { it.equals(status, ignoreCase = true) }
+
+  fun persistSession() {
+    val slots =
+      castSlots.map {
+        buildJsonObject {
+          put("letter", it.letter)
+          put("included", it.included)
+          put("boundCastId", it.boundCastId)
+          put("inlineName", it.inlineName)
+          put("inlineBible", it.inlineBible)
+        }
+      }
+    val blob =
+      buildJsonObject {
+        put("brief", brief)
+        put("planModel", planModel)
+        selectedProjectId?.let { put("selectedProjectId", it) }
+        storyboard?.let { put("storyboard", it) }
+        bundleKey?.let { put("bundleKey", it) }
+        audioKey?.let { put("audioKey", it) }
+        put("qualityTier", qualityTier)
+        renderJobId?.let { put("renderJobId", it) }
+        put("renderStatus", renderStatus)
+        put("plannerStep", plannerStep.name)
+        put("bpm", bpm)
+        put("motionBackend", motionBackend)
+        put("keyframesOnly", keyframesOnly)
+        put("expertJson", expertJson)
+        put("scorePrompt", scorePrompt)
+        put("slots", buildJsonArray { slots.forEach { add(it) } })
+        put(
+          "sceneStartImages",
+          buildJsonObject { sceneStartImages.forEach { (k, v) -> put(k, v) } },
+        )
+      }
+    store.sessionJson = blob.pretty()
+  }
+
+  private fun restoreSession() {
+    val raw = store.sessionJson
+    if (raw.isBlank()) return
+    runCatching {
+      val o = org.skyphusion.vivijure.kit.studioJson.parseToJsonElement(raw).jsonObject
+      brief = o["brief"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      planModel = o["planModel"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      selectedProjectId = o["selectedProjectId"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+      storyboard = o["storyboard"]
+      storyboard?.let {
+        sceneEdits.clear()
+        sceneEdits.addAll(StoryboardHelpers.scenesFrom(it))
+      }
+      bundleKey = o["bundleKey"]?.jsonPrimitive?.contentOrNull
+      audioKey = o["audioKey"]?.jsonPrimitive?.contentOrNull
+      qualityTier = o["qualityTier"]?.jsonPrimitive?.contentOrNull ?: "final"
+      renderJobId = o["renderJobId"]?.jsonPrimitive?.contentOrNull
+      renderStatus = o["renderStatus"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      o["plannerStep"]?.jsonPrimitive?.contentOrNull?.let { name ->
+        PlannerStep.entries.find { it.name == name }?.let { plannerStep = it }
+      }
+      bpm = o["bpm"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull() ?: 120.0
+      motionBackend = o["motionBackend"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      keyframesOnly = o["keyframesOnly"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+      expertJson = o["expertJson"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      scorePrompt = o["scorePrompt"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      o["slots"]?.jsonArray?.forEach { el ->
+        val s = el.jsonObject
+        val letter = s["letter"]?.jsonPrimitive?.contentOrNull ?: return@forEach
+        val slot = castSlots.find { it.letter == letter } ?: return@forEach
+        slot.included = s["included"]?.jsonPrimitive?.contentOrNull?.toBooleanStrictOrNull() ?: false
+        slot.boundCastId = s["boundCastId"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        slot.inlineName = s["inlineName"]?.jsonPrimitive?.contentOrNull.orEmpty()
+        slot.inlineBible = s["inlineBible"]?.jsonPrimitive?.contentOrNull.orEmpty()
+      }
+      sceneStartImages.clear()
+      o["sceneStartImages"]?.jsonObject?.forEach { (k, v) ->
+        v.jsonPrimitive.contentOrNull?.let { sceneStartImages[k] = it }
       }
     }
   }
@@ -222,6 +342,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
         plannerStep = PlannerStep.CastBundle
         statusMessage = "Plan ready (${sceneEdits.size} scenes)"
+        persistSession()
       } catch (e: Exception) {
         lastError = e.message
       } finally {
@@ -253,6 +374,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         applyStoryboard(next)
         refineInstruction = ""
         statusMessage = "Refined"
+        persistSession()
       } catch (e: Exception) {
         lastError = e.message
       } finally {
@@ -273,6 +395,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             ?: "yaml failed"
         }.getOrElse { it.message.orEmpty() }
     }
+    persistSession()
   }
 
   fun commitSceneEdits() {
@@ -280,6 +403,90 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     applyStoryboard(StoryboardHelpers.applyScenes(sceneEdits, sb))
     preflight = null
     bundleKey = null
+  }
+
+  fun deleteScene(index: Int) {
+    val sb = storyboard ?: return
+    applyStoryboard(StoryboardHelpers.deleteScene(index, sb))
+    preflight = null
+    bundleKey = null
+  }
+
+  fun selectProject(id: Int?) {
+    selectedProjectId = id
+    val c = client ?: return
+    if (id == null) {
+      persistSession()
+      return
+    }
+    viewModelScope.launch {
+      try {
+        val p = withContext(Dispatchers.IO) { c.getProject(id) }
+        p.lastStoryboard?.let {
+          applyStoryboard(it)
+          statusMessage = "Loaded project storyboard"
+        }
+        persistSession()
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun deleteSelectedProject() {
+    val c = client ?: return
+    val id = selectedProjectId ?: return
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.deleteProject(id) }
+        selectedProjectId = null
+        projects = withContext(Dispatchers.IO) { c.listProjects() }
+        statusMessage = "Project deleted"
+        persistSession()
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun saveStoryboardToProject() {
+    val c = client ?: return
+    val sb = storyboard ?: return
+    val pid = selectedProjectId ?: run {
+      lastError = "Select a project"
+      return
+    }
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.saveStoryboard(pid, sb) }
+        projects = withContext(Dispatchers.IO) { c.listProjects() }
+        statusMessage = "Storyboard saved"
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun stageSceneStart(sceneId: String, bytes: ByteArray, mime: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val up = withContext(Dispatchers.IO) { c.uploadCharacterRef(bytes, mime) }
+        sceneStartImages[sceneId] = up.key
+        statusMessage = "Staged start for $sceneId"
+        persistSession()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun clearSceneStart(sceneId: String) {
+    sceneStartImages.remove(sceneId)
+    persistSession()
   }
 
   fun runPreflight() {
@@ -339,6 +546,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         bundleKey = key
         plannerStep = PlannerStep.Render
         statusMessage = "Bundled: $key"
+        persistSession()
       } catch (e: Exception) {
         lastError = e.message
       } finally {
@@ -388,6 +596,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         renderStatus = job.status ?: job.phase ?: "submitted"
         plannerStep = PlannerStep.History
         statusMessage = "Render $jid"
+        persistSession()
         startPoll(c, jid)
       } catch (e: Exception) {
         lastError = e.message
@@ -440,6 +649,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     renderStatus = job.status ?: "submitted"
     plannerStep = PlannerStep.History
     statusMessage = "Scatter $jid"
+    persistSession()
     startPoll(c, jid)
   }
 
@@ -462,11 +672,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
           try {
             val job = withContext(Dispatchers.IO) { c.pollStoryboardRender(jid) }
             renderStatus = job.status ?: job.phase ?: renderStatus
-            val done =
-              listOf("COMPLETED", "FAILED", "CANCELLED", "done", "failed")
-                .any { it.equals(renderStatus, ignoreCase = true) }
-            if (done) {
+            persistSession()
+            if (isTerminal(renderStatus)) {
               statusMessage = "Render $renderStatus"
+              if (notifyOnRender) {
+                NotificationHelper.notifyRenderDone(appContext, jid, renderStatus)
+              }
               refreshHistory()
               return@launch
             }
@@ -483,8 +694,10 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     val c = client ?: return
     viewModelScope.launch {
       try {
-        renders =
-          withContext(Dispatchers.IO) { c.listRenders(selectedProjectId) }
+        withContext(Dispatchers.IO) {
+          renders = c.listRenders(selectedProjectId)
+          renderTags = runCatching { c.listRenderTags() }.getOrDefault(emptyList())
+        }
       } catch (e: Exception) {
         lastError = e.message
       }
@@ -509,6 +722,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val p = withContext(Dispatchers.IO) { c.createProject(name) }
         selectedProjectId = p.id
         projects = withContext(Dispatchers.IO) { c.listProjects() }
+        persistSession()
       } catch (e: Exception) {
         lastError = e.message
       }
@@ -527,14 +741,124 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
+  fun patchCast(id: String, name: String?, bible: String?) {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.patchCast(id, name, bible) }
+        refreshCast()
+        statusMessage = "Cast updated"
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
   fun deleteCast(id: String) {
     val c = client ?: return
     viewModelScope.launch {
       try {
         withContext(Dispatchers.IO) { c.deleteCast(id) }
+        if (selectedCastId == id) selectedCastId = null
+        castSlots.forEach { if (it.boundCastId == id) it.boundCastId = "" }
         refreshCast()
       } catch (e: Exception) {
         lastError = e.message
+      }
+    }
+  }
+
+  fun uploadCastImage(id: String, kind: String, bytes: ByteArray, mime: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        withContext(Dispatchers.IO) { c.uploadCastImage(id, kind, bytes, mime) }
+        refreshCast()
+        statusMessage = "Uploaded $kind"
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun trainCast(id: String, wan: Boolean) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val r = withContext(Dispatchers.IO) { c.trainLora(id, wan) }
+        statusMessage = "Train ${if (wan) "Wan" else "SDXL"}: ${r.pretty().take(120)}"
+        refreshCast()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun generateCastRefs(id: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val start = withContext(Dispatchers.IO) { c.generateRefs(id) }
+        val jid =
+          start.jsonObject["job_id"]?.jsonPrimitive?.contentOrNull
+            ?: start.jsonObject["jobId"]?.jsonPrimitive?.contentOrNull
+        if (jid != null) {
+          statusMessage = "refs job $jid"
+          repeat(60) {
+            val job = withContext(Dispatchers.IO) { c.pollRefsJob(id, jid) }
+            val phase = job.jsonObject["phase"]?.jsonPrimitive?.contentOrNull.orEmpty()
+            statusMessage = "refs $jid: $phase"
+            if (phase in listOf("done", "failed")) return@repeat
+            delay(3_000)
+          }
+        } else {
+          statusMessage = start.pretty().take(120)
+        }
+        refreshCast()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun exportCast(id: String, onBytes: (ByteArray, String) -> Unit) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val bytes = withContext(Dispatchers.IO) { c.exportCast(id) }
+        val name = cast.find { it.id == id }?.name?.replace(" ", "-") ?: id
+        onBytes(bytes, "$name.vvcast")
+        statusMessage = "Exported $name.vvcast"
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun importCast(bytes: ByteArray) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val m = withContext(Dispatchers.IO) { c.importCast(bytes) }
+        statusMessage = "Imported ${m.name}"
+        refreshCast()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
       }
     }
   }
@@ -624,6 +948,45 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     statusMessage = "Snapped to $bpm BPM"
   }
 
+  fun analyzeAudio() {
+    val c = client ?: return
+    val key = audioKey ?: run {
+      lastError = "No audio key"
+      return
+    }
+    viewModelScope.launch {
+      busy = true
+      try {
+        val r = withContext(Dispatchers.IO) { c.analyzeAudio(key) }
+        r.jsonObject["bpm"]?.jsonPrimitive?.contentOrNull?.toDoubleOrNull()?.let {
+          bpm = it
+          statusMessage = "Analyzed BPM $it"
+        } ?: run { statusMessage = r.pretty().take(160) }
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun uploadAudio(bytes: ByteArray, mime: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val up = withContext(Dispatchers.IO) { c.uploadAudio(bytes, mime) }
+        audioKey = up.key
+        statusMessage = "Audio staged: ${up.key}"
+        persistSession()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
   fun deleteRender(id: Int) {
     val c = client ?: return
     viewModelScope.launch {
@@ -636,6 +999,197 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
+  fun patchRenderLabel(id: Int, label: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.patchRender(id, label = label) }
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun patchRenderTags(id: Int, tagsCsv: String) {
+    val c = client ?: return
+    val tags =
+      tagsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.patchRender(id, tags = tags) }
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun toggleLockedShot(renderId: Int, shotId: String, currently: List<String>) {
+    val c = client ?: return
+    val next = currently.toMutableSet()
+    if (!next.add(shotId)) next.remove(shotId)
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.patchRender(renderId, lockedShots = next.sorted()) }
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun regenShot(renderId: Int, shotId: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val job = withContext(Dispatchers.IO) { c.regenShot(renderId, shotId) }
+        val jid = job.resolvedJobId
+        if (jid != null) {
+          renderJobId = jid
+          renderStatus = job.status ?: "submitted"
+          persistSession()
+          startPoll(c, jid)
+          statusMessage = "Regen $shotId job $jid"
+        }
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun addAudioToHistory(id: Int) {
+    val c = client ?: return
+    val key = audioKey ?: run {
+      lastError = "Stage an audio bed first"
+      return
+    }
+    viewModelScope.launch {
+      busy = true
+      try {
+        withContext(Dispatchers.IO) { c.addAudioToRender(id, key) }
+        statusMessage = "Audio muxed onto #$id"
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun addNarrationToHistory(id: Int, text: String) {
+    val c = client ?: return
+    val t = text.trim()
+    if (t.isEmpty()) {
+      lastError = "Narration text required"
+      return
+    }
+    viewModelScope.launch {
+      busy = true
+      try {
+        withContext(Dispatchers.IO) { c.addNarrationToRender(id, t) }
+        statusMessage = "Narration added to #$id"
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun finalizeHistory(id: Int) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        withContext(Dispatchers.IO) {
+          c.finalizeRender(id, audioKey, castBindings.ifEmpty { null })
+        }
+        statusMessage = "Finalize submitted for #$id"
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun animateCloudHistory(id: Int) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val map = cloudPerShot.filter { it.value.isNotBlank() }
+        withContext(Dispatchers.IO) {
+          c.animateCloud(
+            id,
+            cloudAnimateModel.ifBlank { null },
+            map.ifEmpty { null },
+          )
+        }
+        statusMessage = "Cloud animate #$id"
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun animateHybridHistory(id: Int) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val backends =
+          if (hybridPerShot.isEmpty()) null
+          else
+            buildJsonObject {
+              hybridPerShot.forEach { (shot, backend) ->
+                put(
+                  shot,
+                  buildJsonObject {
+                    put("backend", backend)
+                    if (backend == "cloud" && cloudAnimateModel.isNotBlank()) {
+                      put("model", cloudAnimateModel)
+                    }
+                  },
+                )
+              }
+            }
+        withContext(Dispatchers.IO) {
+          c.animateHybrid(
+            id,
+            backends,
+            "gpu",
+            cloudAnimateModel.ifBlank { null },
+          )
+        }
+        statusMessage = "Hybrid animate #$id"
+        refreshHistory()
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun seedPerShotMaps(row: RenderRow) {
+    row.keyframeShotIds.forEach { shot ->
+      if (!cloudPerShot.containsKey(shot)) cloudPerShot[shot] = ""
+      if (!hybridPerShot.containsKey(shot)) hybridPerShot[shot] = "gpu"
+    }
+  }
+
   fun loadRender(row: RenderRow) {
     row.bundleKey?.let { bundleKey = it }
     row.qualityTier?.let { qualityTier = it }
@@ -643,6 +1197,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     row.storyboard?.let { applyStoryboard(it) }
     plannerStep = PlannerStep.Render
     statusMessage = "Loaded bundle ${row.bundleKey}"
+    persistSession()
   }
 
   fun openArtifact(key: String, onUrl: (String) -> Unit) {
@@ -656,6 +1211,164 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
       }
     }
   }
+
+  fun installModule(scriptName: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        withContext(Dispatchers.IO) { c.installModule(scriptName) }
+        installedModules = withContext(Dispatchers.IO) { c.listInstalledModules() }
+        bootstrap()
+        statusMessage = "Installed $scriptName"
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun uninstallModule(name: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.uninstallModule(name) }
+        installedModules = withContext(Dispatchers.IO) { c.listInstalledModules() }
+        bootstrap()
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun setModuleEnabled(name: String, enabled: Boolean) {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        withContext(Dispatchers.IO) { c.setModuleEnabled(name, enabled) }
+        installedModules = withContext(Dispatchers.IO) { c.listInstalledModules() }
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun loadModuleConfig(name: String) {
+    val c = client ?: return
+    moduleConfigName = name
+    viewModelScope.launch {
+      try {
+        val r = withContext(Dispatchers.IO) { c.getModuleConfig(name) }
+        moduleConfigJson = r.config?.pretty() ?: "{}"
+      } catch (e: Exception) {
+        moduleConfigJson = "{}"
+        lastError = e.message
+      }
+    }
+  }
+
+  fun saveModuleConfig() {
+    val c = client ?: return
+    val name = moduleConfigName
+    if (name.isBlank()) return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val el = org.skyphusion.vivijure.kit.studioJson.parseToJsonElement(moduleConfigJson)
+        withContext(Dispatchers.IO) { c.patchModuleConfig(name, el) }
+        statusMessage = "Saved config for $name"
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun savePrefs() {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        val el = org.skyphusion.vivijure.kit.studioJson.parseToJsonElement(prefsJson)
+        val next = withContext(Dispatchers.IO) { c.patchPrefs(el) }
+        prefsJson = next.pretty()
+        statusMessage = "Prefs saved"
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun refreshStorage() {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        val u = withContext(Dispatchers.IO) { c.storageUsage() }
+        storageSummary =
+          "used=${u.usedBytes ?: 0} objects=${u.objects ?: 0} quota=${u.quotaBytes} over=${u.over}"
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  fun reconcileStorage() {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        withContext(Dispatchers.IO) { c.storageReconcile() }
+        refreshStorage()
+        statusMessage = "Storage reconcile submitted"
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun runDemoRender(scene: String) {
+    val c = client ?: return
+    viewModelScope.launch {
+      busy = true
+      try {
+        val r = withContext(Dispatchers.IO) { c.demoRender(scene) }
+        val jid = r.resolvedJobId ?: run {
+          lastError = r.error ?: "No demo job"
+          return@launch
+        }
+        demoStatus = r.status ?: "submitted"
+        repeat(60) {
+          val poll = withContext(Dispatchers.IO) { c.pollDemoRender(jid) }
+          demoStatus = poll.jsonObject["status"]?.jsonPrimitive?.contentOrNull ?: demoStatus
+          if (demoStatus.lowercase() in listOf("completed", "failed", "done", "error")) return@repeat
+          delay(3_000)
+        }
+        statusMessage = "Demo $demoStatus"
+      } catch (e: Exception) {
+        lastError = e.message
+      } finally {
+        busy = false
+      }
+    }
+  }
+
+  fun runDemoChat(message: String, onReply: (String) -> Unit) {
+    val c = client ?: return
+    viewModelScope.launch {
+      try {
+        val r = withContext(Dispatchers.IO) { c.demoChat(message) }
+        onReply(r.reply ?: r.output ?: "")
+      } catch (e: Exception) {
+        lastError = e.message
+      }
+    }
+  }
+
+  val cloudMotionModels: List<String>
+    get() = modules?.motionBackends().orEmpty().filter { !it.contains("own-gpu") }
 
   fun storyboardPretty(): String = storyboard?.pretty() ?: ""
 }
