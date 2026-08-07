@@ -16,19 +16,12 @@ jobs:
   kit:
     name: kit
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
       - name: Kit unit tests
-        run: |
-          # Kit is plain JVM; use a minimal gradle init if wrapper not yet vendored
-          if [ -x ./gradlew ]; then
-            ./gradlew :vivijure-kit:test --no-daemon
-          else
-            echo "gradlew not yet vendored; kit sources present"
-            test -f vivijure-kit/src/main/kotlin/org/skyphusion/vivijure/kit/VivijureClient.kt
-          fi
+        run: ./gradlew :vivijure-kit:test --no-daemon --stacktrace
