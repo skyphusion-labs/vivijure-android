@@ -24,5 +24,6 @@ Wire shapes: host **`docs/CONTRACT.md`**. Do not invent routes.
 
 ## Status
 
-**0.1 WIP.** Kit covers core planner + cast + modules + history routes. Compose shell has stepped
-planner end to end. Not on Play Store yet. Parity checklist: [PARITY.md](PARITY.md).
+**0.1 WIP.** Kit + Compose shell track the web/iOS planner CONTRACT (cast media, history
+post-actions, modules install/config, demo, session restore). Not on Play Store yet. Parity:
+[PARITY.md](PARITY.md).

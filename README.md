@@ -2,7 +2,7 @@
 
 **License:** AGPL-3.0-only  
 **App name:** Vivijure for Android  
-**Status:** 0.1 WIP (kit + stepped Compose planner)  
+**Status:** 0.1 WIP (kit + full stepped Compose planner panel)  
 **applicationId:** `org.skyphusion.vivijure`  
 **Studio API:** [vivijure-cf](https://github.com/skyphusion-labs/vivijure-cf) / [vivijure-local](https://github.com/skyphusion-labs/vivijure-local)  
 **Sibling:** [vivijure-ios](https://github.com/skyphusion-labs/vivijure-ios)  
