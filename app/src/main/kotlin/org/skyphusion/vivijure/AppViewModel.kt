@@ -581,10 +581,15 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
           lastError = "Pick a motion backend"
           return@launch
         }
+        val filmScenes = StoryboardHelpers.filmScenes(sb)
+        if (filmScenes.isEmpty()) {
+          lastError = "Every scene needs a prompt before render"
+          return@launch
+        }
         val overrides = buildOverrides()
         val body =
           buildJsonObject {
-            put("storyboard", sb)
+            put("scenes", filmScenes)
             bundleKey?.let { put("bundleKey", it) }
             put("qualityTier", qualityTier)
             selectedProjectId?.let { put("projectId", it) }
