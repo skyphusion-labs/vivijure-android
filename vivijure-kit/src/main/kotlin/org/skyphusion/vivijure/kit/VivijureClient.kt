@@ -63,7 +63,7 @@ class VivijureClient(
   // Projects
   fun listProjects(): List<StoryboardProject> = get<ProjectsListResponse>("/api/storyboard/projects").projects
 
-  fun getProject(id: Int): StoryboardProject = get<ProjectItemResponse>("/api/storyboard/projects/$id").project
+  fun getProject(id: String): StoryboardProject = get<ProjectItemResponse>("/api/storyboard/projects/${enc(id)}").project
 
   fun createProject(name: String): StoryboardProject =
     send<ProjectItemResponse>(
@@ -72,15 +72,15 @@ class VivijureClient(
       buildJsonObject { put("name", name) },
     ).project
 
-  fun saveStoryboard(projectId: Int, storyboard: JsonElement): StoryboardProject =
+  fun saveStoryboard(projectId: String, storyboard: JsonElement): StoryboardProject =
     send<ProjectItemResponse>(
       "POST",
-      "/api/storyboard/projects/$projectId/storyboard",
+      "/api/storyboard/projects/${enc(projectId)}/storyboard",
       buildJsonObject { put("storyboard", storyboard) },
     ).project
 
-  fun deleteProject(id: Int) {
-    http.sendJson("DELETE", "/api/storyboard/projects/$id", null, token())
+  fun deleteProject(id: String) {
+    http.sendJson("DELETE", "/api/storyboard/projects/${enc(id)}", null, token())
   }
 
   // Cast
@@ -221,22 +221,22 @@ class VivijureClient(
     send("POST", "/api/storyboard/render/scatter", body)
 
   // History
-  fun listRenders(projectId: Int? = null): List<RenderRow> {
-    val q = if (projectId != null) mapOf("project_id" to projectId.toString()) else emptyMap()
+  fun listRenders(projectId: String? = null): List<RenderRow> {
+    val q = if (projectId != null) mapOf("project_id" to projectId) else emptyMap()
     return get<RendersListResponse>("/api/storyboard/renders", q).renders
   }
 
   fun listRenderTags(): List<String> = get<TagsListResponse>("/api/storyboard/renders/tags").tags
 
   fun patchRender(
-    id: Int,
+    id: String,
     label: String? = null,
     tags: List<String>? = null,
     lockedShots: List<String>? = null,
   ): RenderRow =
     send(
       "PATCH",
-      "/api/storyboard/renders/$id",
+      "/api/storyboard/renders/${enc(id)}",
       buildJsonObject {
         if (label != null) put("label", label)
         if (tags != null) {
@@ -256,20 +256,20 @@ class VivijureClient(
       },
     )
 
-  fun deleteRender(id: Int) {
-    http.sendJson("DELETE", "/api/storyboard/renders/$id", null, token())
+  fun deleteRender(id: String) {
+    http.sendJson("DELETE", "/api/storyboard/renders/${enc(id)}", null, token())
   }
 
-  fun addAudioToRender(id: Int, audioKey: String): JsonElement =
-    send("POST", "/api/storyboard/renders/$id/add-audio", buildJsonObject { put("audioKey", audioKey) })
+  fun addAudioToRender(id: String, audioKey: String): JsonElement =
+    send("POST", "/api/storyboard/renders/${enc(id)}/add-audio", buildJsonObject { put("audioKey", audioKey) })
 
-  fun addNarrationToRender(id: Int, text: String): JsonElement =
-    send("POST", "/api/storyboard/renders/$id/add-narration", buildJsonObject { put("text", text) })
+  fun addNarrationToRender(id: String, text: String): JsonElement =
+    send("POST", "/api/storyboard/renders/${enc(id)}/add-narration", buildJsonObject { put("text", text) })
 
-  fun finalizeRender(id: Int, audioKey: String? = null, castLoras: Map<String, String>? = null): JsonElement =
+  fun finalizeRender(id: String, audioKey: String? = null, castLoras: Map<String, String>? = null): JsonElement =
     send(
       "POST",
-      "/api/storyboard/renders/$id/finalize",
+      "/api/storyboard/renders/${enc(id)}/finalize",
       buildJsonObject {
         if (audioKey != null) put("audioKey", audioKey)
         if (castLoras != null) {
@@ -278,10 +278,10 @@ class VivijureClient(
       },
     )
 
-  fun animateCloud(id: Int, model: String? = null, perShot: Map<String, String>? = null): JsonElement =
+  fun animateCloud(id: String, model: String? = null, perShot: Map<String, String>? = null): JsonElement =
     send(
       "POST",
-      "/api/storyboard/renders/$id/animate-cloud",
+      "/api/storyboard/renders/${enc(id)}/animate-cloud",
       buildJsonObject {
         if (model != null) put("model", model)
         if (perShot != null && perShot.isNotEmpty()) {
@@ -291,14 +291,14 @@ class VivijureClient(
     )
 
   fun animateHybrid(
-    id: Int,
+    id: String,
     backends: JsonElement? = null,
     defaultBackend: String? = "gpu",
     defaultCloudModel: String? = null,
   ): JsonElement =
     send(
       "POST",
-      "/api/storyboard/renders/$id/animate-hybrid",
+      "/api/storyboard/renders/${enc(id)}/animate-hybrid",
       buildJsonObject {
         if (backends != null) put("backends", backends)
         if (defaultBackend != null) put("defaultBackend", defaultBackend)
@@ -306,8 +306,8 @@ class VivijureClient(
       },
     )
 
-  fun regenShot(renderId: Int, shotId: String): RenderJobResponse =
-    send("POST", "/api/storyboard/renders/$renderId/regen-shot", buildJsonObject { put("shotId", shotId) })
+  fun regenShot(renderId: String, shotId: String): RenderJobResponse =
+    send("POST", "/api/storyboard/renders/${enc(renderId)}/regen-shot", buildJsonObject { put("shotId", shotId) })
 
   // Upload / audio / artifacts
   fun uploadImage(data: ByteArray, mime: String): UploadResponse {

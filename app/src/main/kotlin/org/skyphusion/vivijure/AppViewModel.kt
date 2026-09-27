@@ -62,7 +62,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     private set
 
   var projects by mutableStateOf<List<StoryboardProject>>(emptyList())
-  var selectedProjectId by mutableStateOf<Int?>(null)
+  var selectedProjectId by mutableStateOf<String?>(null)
   var brief by mutableStateOf("")
   var planModel by mutableStateOf("")
   var availableModels = mutableStateListOf<String>()
@@ -259,7 +259,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
       val o = org.skyphusion.vivijure.kit.studioJson.parseToJsonElement(raw).jsonObject
       brief = o["brief"]?.jsonPrimitive?.contentOrNull.orEmpty()
       planModel = o["planModel"]?.jsonPrimitive?.contentOrNull.orEmpty()
-      selectedProjectId = o["selectedProjectId"]?.jsonPrimitive?.contentOrNull?.toIntOrNull()
+      selectedProjectId = o["selectedProjectId"]?.jsonPrimitive?.contentOrNull
       storyboard = o["storyboard"]
       storyboard?.let {
         sceneEdits.clear()
@@ -412,7 +412,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     bundleKey = null
   }
 
-  fun selectProject(id: Int?) {
+  fun selectProject(id: String?) {
     selectedProjectId = id
     val c = client ?: return
     if (id == null) {
@@ -992,7 +992,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun deleteRender(id: Int) {
+  fun deleteRender(id: String) {
     val c = client ?: return
     viewModelScope.launch {
       try {
@@ -1004,7 +1004,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun patchRenderLabel(id: Int, label: String) {
+  fun patchRenderLabel(id: String, label: String) {
     val c = client ?: return
     viewModelScope.launch {
       try {
@@ -1016,7 +1016,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun patchRenderTags(id: Int, tagsCsv: String) {
+  fun patchRenderTags(id: String, tagsCsv: String) {
     val c = client ?: return
     val tags =
       tagsCsv.split(",").map { it.trim() }.filter { it.isNotEmpty() }
@@ -1030,7 +1030,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun toggleLockedShot(renderId: Int, shotId: String, currently: List<String>) {
+  fun toggleLockedShot(renderId: String, shotId: String, currently: List<String>) {
     val c = client ?: return
     val next = currently.toMutableSet()
     if (!next.add(shotId)) next.remove(shotId)
@@ -1044,7 +1044,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun regenShot(renderId: Int, shotId: String) {
+  fun regenShot(renderId: String, shotId: String) {
     val c = client ?: return
     viewModelScope.launch {
       busy = true
@@ -1067,7 +1067,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun addAudioToHistory(id: Int) {
+  fun addAudioToHistory(id: String) {
     val c = client ?: return
     val key = audioKey ?: run {
       lastError = "Stage an audio bed first"
@@ -1087,7 +1087,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun addNarrationToHistory(id: Int, text: String) {
+  fun addNarrationToHistory(id: String, text: String) {
     val c = client ?: return
     val t = text.trim()
     if (t.isEmpty()) {
@@ -1108,7 +1108,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun finalizeHistory(id: Int) {
+  fun finalizeHistory(id: String) {
     val c = client ?: return
     viewModelScope.launch {
       busy = true
@@ -1126,7 +1126,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun animateCloudHistory(id: Int) {
+  fun animateCloudHistory(id: String) {
     val c = client ?: return
     viewModelScope.launch {
       busy = true
@@ -1149,7 +1149,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
     }
   }
 
-  fun animateHybridHistory(id: Int) {
+  fun animateHybridHistory(id: String) {
     val c = client ?: return
     viewModelScope.launch {
       busy = true

@@ -56,7 +56,7 @@ data class ModulesResponse(
 
 @Serializable
 data class StoryboardProject(
-  val id: Int,
+  val id: String,
   val slug: String? = null,
   val name: String,
   val prefs: JsonElement? = null,
@@ -137,7 +137,7 @@ data class RenderJobResponse(
 
 @Serializable
 data class RenderRow(
-  val id: Int,
+  val id: String,
   @SerialName("job_id") val jobId: String? = null,
   val project: String? = null,
   @SerialName("bundle_key") val bundleKey: String? = null,
@@ -148,7 +148,7 @@ data class RenderRow(
   val label: String? = null,
   val mode: String? = null,
   val tags: List<String>? = null,
-  @SerialName("project_id") val projectId: Int? = null,
+  @SerialName("project_id") val projectId: String? = null,
   @SerialName("locked_shots") val lockedShotsSnake: List<String>? = null,
   val lockedShots: List<String>? = null,
   val keyframes: List<JsonElement>? = null,
