@@ -28,6 +28,28 @@ object StoryboardHelpers {
     return scenes.mapIndexed { i, s -> sceneId(i, s) }
   }
 
+  /** Host FilmScene[] for POST /api/storyboard/render (mirrors the panel buildFilmScenes). */
+  fun filmScenes(storyboard: JsonElement): JsonArray {
+    val root = storyboard.jsonObject
+    val scenes = root["scenes"]?.jsonArray ?: return JsonArray(emptyList())
+    val clip = root["clip_seconds"]?.jsonPrimitive?.doubleOrNull?.takeIf { it > 0 } ?: 4.0
+    return buildJsonArray {
+      scenes.forEachIndexed { i, s ->
+        val prompt = s.jsonObject["prompt"]?.jsonPrimitive?.contentOrNull?.trim().orEmpty()
+        if (prompt.isEmpty()) return@forEachIndexed
+        val seconds =
+          s.jsonObject["target_seconds"]?.jsonPrimitive?.doubleOrNull?.takeIf { it > 0 } ?: clip
+        add(
+          buildJsonObject {
+            put("shot_id", JsonPrimitive(sceneId(i, s)))
+            put("prompt", JsonPrimitive(prompt))
+            put("seconds", JsonPrimitive(seconds))
+          },
+        )
+      }
+    }
+  }
+
   fun useCharacters(storyboard: JsonElement): List<String> {
     val arr = storyboard.jsonObject["use_characters"]?.jsonArray ?: return emptyList()
     return arr.mapNotNull { it.jsonPrimitive.contentOrNull }
