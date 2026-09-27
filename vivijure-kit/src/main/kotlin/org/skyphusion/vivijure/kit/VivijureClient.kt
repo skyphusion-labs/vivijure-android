@@ -167,7 +167,7 @@ class VivijureClient(
       "/api/storyboard/refine",
       buildJsonObject {
         put("storyboard", storyboard)
-        put("instruction", instruction)
+        put("message", instruction)
         if (model != null) put("model", model)
       },
     )
