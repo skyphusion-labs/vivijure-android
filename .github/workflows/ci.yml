@@ -26,6 +26,24 @@ jobs:
       - name: Kit unit tests
         run: ./gradlew :vivijure-kit:test --no-daemon --stacktrace
 
+  # Compiles the `:app` Compose module. `kit` only runs `:vivijure-kit:test`, so before this
+  # job an app-level Kotlin change (AppViewModel.kt, MainActivity.kt, ...) could break the
+  # build with every check green (issue #26). `ubuntu-latest` ships the Android SDK.
+  # NOT path-filtered on purpose: it feeds the `ci` aggregate below, and a skipped
+  # component would fail that aggregate (and a skipped required check reads as passed).
+  app:
+    name: app
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+      - name: Compile app module
+        run: ./gradlew :app:compileDebugKotlin --no-daemon --stacktrace
+
   # `ci` is a REQUIRED status check in the org `aviation-grade-main-org` ruleset and is
   # matched by STRING against the check-run name, which is a job's `name:`. It matches
   # neither the workflow filename nor this workflow's own `name:` field, so a workflow
@@ -40,7 +58,7 @@ jobs:
   # docs/runbooks/aviation-grade-main.md section 4.
   ci:
     name: ci
-    needs: [kit]
+    needs: [kit, app]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -48,3 +66,4 @@ jobs:
       - name: Require all component jobs
         run: |
           test "${{ needs.kit.result }}" = "success"
+          test "${{ needs.app.result }}" = "success"
