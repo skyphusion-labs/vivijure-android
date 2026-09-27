@@ -24,6 +24,7 @@ import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.put
 import org.skyphusion.vivijure.kit.CastMember
+import org.skyphusion.vivijure.kit.MISSING_PLANNER_MODEL_MESSAGE
 import org.skyphusion.vivijure.kit.ModulesResponse
 import org.skyphusion.vivijure.kit.PlanCastSlot
 import org.skyphusion.vivijure.kit.PreflightResponse
@@ -34,6 +35,7 @@ import org.skyphusion.vivijure.kit.StoryboardHelpers
 import org.skyphusion.vivijure.kit.StoryboardProject
 import org.skyphusion.vivijure.kit.VivijureClient
 import org.skyphusion.vivijure.kit.WhoamiResponse
+import org.skyphusion.vivijure.kit.chosenPlannerModel
 import org.skyphusion.vivijure.kit.plannerSlotIds
 import org.skyphusion.vivijure.kit.pretty
 
@@ -319,13 +321,17 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
   fun runPlan() {
     val c = client ?: return
+    val model = chosenPlannerModel(planModel) ?: run {
+      lastError = MISSING_PLANNER_MODEL_MESSAGE
+      return
+    }
     viewModelScope.launch {
       busy = true
       lastError = null
       try {
         val resp =
           withContext(Dispatchers.IO) {
-            c.plan(brief, planModel.ifBlank { null }, charactersJson())
+            c.plan(brief, model, charactersJson())
           }
         if (resp.error != null) {
           lastError = resp.error
@@ -359,12 +365,16 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
       lastError = "Refine instruction required"
       return
     }
+    val model = chosenPlannerModel(planModel) ?: run {
+      lastError = MISSING_PLANNER_MODEL_MESSAGE
+      return
+    }
     viewModelScope.launch {
       busy = true
       try {
         val resp =
           withContext(Dispatchers.IO) {
-            c.refine(sb, instruction, planModel.ifBlank { null })
+            c.refine(sb, instruction, model)
           }
         if (resp.error != null) {
           lastError = resp.error
