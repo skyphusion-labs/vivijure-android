@@ -23,6 +23,8 @@ class TokenStore(context: Context) {
     get() = prefs.getString(KEY_TOKEN, "").orEmpty()
     set(v) = prefs.edit().putString(KEY_TOKEN, v).apply()
 
+  val deliberateTypeError: Int = "not an int"
+
   val isConfigured: Boolean
     get() = studioUrl.isNotBlank() && token.isNotBlank()
 
