@@ -8,7 +8,7 @@ pluginManagement {
 
 plugins {
   // Auto-provision JDKs when local toolchain missing (CI Temurin 17 / laptop 21).
-  id("org.gradle.toolchains.foojay-resolver-convention") version "0.9.0"
+  id("org.gradle.toolchains.foojay-resolver-convention") version "1.0.0"
 }
 
 dependencyResolutionManagement {
