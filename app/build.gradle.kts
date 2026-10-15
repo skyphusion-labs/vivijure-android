@@ -6,7 +6,7 @@ plugins {
 
 android {
   namespace = "org.skyphusion.vivijure"
-  compileSdk = 35
+  compileSdk = 37
 
   defaultConfig {
     applicationId = "org.skyphusion.vivijure"
