@@ -51,7 +51,7 @@ dependencies {
   implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
   implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.7")
   implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.7")
-  implementation("androidx.navigation:navigation-compose:2.8.4")
+  implementation("androidx.navigation:navigation-compose:2.10.2")
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
   implementation("androidx.security:security-crypto:1.1.0")
   implementation("androidx.core:core-ktx:1.13.1")
