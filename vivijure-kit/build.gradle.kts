@@ -10,7 +10,7 @@ version = "0.1.0"
 dependencies {
   // api: app module uses JsonElement / OkHttp types from kit public surface
   api("org.jetbrains.kotlinx:kotlinx-serialization-json:1.12.0")
-  api("com.squareup.okhttp3:okhttp:5.5.0")
+  api("com.squareup.okhttp3:okhttp:5.5.1")
   implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.11.0")
 
   testImplementation(kotlin("test"))
