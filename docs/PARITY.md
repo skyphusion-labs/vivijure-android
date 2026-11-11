@@ -31,7 +31,7 @@ Sibling authority: vivijure-ios `docs/PARITY.md` + host `public/planner*.js`.
 |------------|--------|
 | Cast media upload (portrait/ref/source) | **done** |
 | generate-refs + poll | **done** |
-| train SDXL / Wan LoRA | **done** |
+| train SDXL / Wan LoRA | **done** (Wan LoRA training needs the studio to point at an operator's own endpoint; hosted Wan training is retired) |
 | `.vvcast` import/export | **done** |
 | Module install/enable/uninstall | **done** (dispatch hosts) |
 | Install-scope config JSON | **done** |
